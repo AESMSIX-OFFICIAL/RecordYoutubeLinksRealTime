@@ -1,7 +1,7 @@
 # YouTube Logger – README
 
 **Short Description**
-YouTube Logger is a Firefox (and compatible with Chrome) browser extension that automatically captures active YouTube video URLs and sends them via WebSocket to a Python server. The server processes video metadata using `yt-dlp`, categorizes videos into music and non-music, and logs them accordingly.
+YouTube Logger is a Firefox browser extension that automatically captures active YouTube video URLs and sends them via WebSocket to a Python server. The server processes video metadata using `yt-dlp`, categorizes videos into music and non-music, and logs them accordingly.
 
 ---
 
