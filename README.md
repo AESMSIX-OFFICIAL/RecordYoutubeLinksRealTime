@@ -1,36 +1,36 @@
-**YouTube Logger – README**
+# YouTube Logger – README
 
-**Deskripsi Singkat**
-YouTube Logger adalah ekstensi Firefox (juga kompatibel dengan Chrome) yang secara otomatis mencatat URL video YouTube yang sedang terbuka atau diputar pada browser, lalu mengirimkannya melalui WebSocket ke server Python. Server akan melakukan filtrasi dan pencatatan detail video, memisahkan antara video musik dan non-musik dengan menggunakan yt-dlp.
-
----
-
-## 📁 Struktur Proyek
-
-```
-├── background.js       # Script background pada ekstensi
-├── popup.html         # UI popup ekstensi
-├── popup.js           # Logika frontend popup
-├── style.css          # (Opsional) Style untuk popup
-├── manifest.json      # Konfigurasi manifest ekstensi
-├── icons/             # Folder ikon ekstensi
-│   └── icon128.png
-└── server_ektension_firefox.py  # Script server Python
-```
+**Short Description**
+YouTube Logger is a Firefox (and compatible with Chrome) browser extension that automatically captures active YouTube video URLs and sends them via WebSocket to a Python server. The server processes video metadata using `yt-dlp`, categorizes videos into music and non-music, and logs them accordingly.
 
 ---
 
-## 🔧 Prasyarat
+## 📁 Project Structure
 
-1. **Browser**: Firefox (dengan manifest v2), atau Chrome (dengan sedikit penyesuaian).
-2. **Python 3.7+**
-3. **Dependencies Python**:
+```
+├── background.js                # Background script of the browser extension
+├── popup.html                  # HTML for extension popup UI
+├── popup.js                    # Frontend logic for the popup
+├── style.css                   # (Optional) Stylesheet for the popup
+├── manifest.json               # Extension manifest configuration
+├── icons/                      # Directory for extension icons
+│   └── icon128.png             # 128x128 icon
+└── server_extension_firefox.py # Python WebSocket server script
+```
+
+---
+
+## 🔧 Prerequisites
+
+1. **Browser**: Firefox with Manifest V2 (or Chrome with minor adjustments).
+2. **Python**: Version 3.7 or higher.
+3. **Python Dependencies**:
 
    * `websockets`
-   * `yt_dlp`
-4. **Port WebSocket**: Default mencoba port `8001–8005` pada `localhost`.
+   * `yt-dlp`
+4. **WebSocket Ports**: Defaults to ports `8001–8005` on `localhost`.
 
-Instalasi dependencies server:
+Install Python dependencies using pip:
 
 ```bash
 pip install websockets yt-dlp
@@ -38,123 +38,124 @@ pip install websockets yt-dlp
 
 ---
 
-## 🚀 Instalasi & Penggunaan
+## 🚀 Installation & Usage
 
-1. **Ekstensi**
-   a. Buka `about:debugging` di Firefox → "Load Temporary Add-on..." → pilih `manifest.json`.
-   b. Aktifkan ekstensi dan buka popup untuk memeriksa status.
+1. **Extension Setup**
 
-2. **Server Python**
-   a. Jalankan server:
+   * Go to `about:debugging` in Firefox → Click "Load Temporary Add-on..." → Select `manifest.json`.
+   * Ensure the extension is enabled and open the popup to verify status.
+
+2. **Starting the Python Server**
 
    ```bash
-   python server_ektension_firefox.py
+   python server_extension_firefox.py
    ```
 
-   b. Server akan mendengarkan WebSocket pada port 8001–8005 dan menunggu koneksi ekstensi.
+   * The server will listen on WebSocket ports 8001–8005 and wait for the extension connection.
 
-3. **Mencatat Video**
+3. **Logging YouTube Videos**
 
-   * Saat Anda membuka atau memutar video YouTube, ekstensi akan otomatis mengirim URL ke server.
-   * Server akan memroses metadata dan mencatat ke file `tab_log.txt` (musik) atau `un_log.txt` (non-musik).
+   * When you open or play a YouTube video, the extension automatically sends the URL to the server.
+   * The server processes metadata, then logs the video to `tab_log.txt` (music) or `un_log.txt` (non-music).
 
 ---
 
-## 📜 Penjelasan Kode
+## 📜 Code Explanation
 
 ### 1. `background.js`
 
-* **Konstanta & Variabel**
+* **Constants & State**
 
-  * `WS_SERVER_PORTS`: Daftar port WebSocket (8001–8005).
-  * `CONNECTION_CODE`: Kode handshake antara ekstensi dan server.
-  * `socket`, `socketConnected`, `connectedPort`: Status koneksi WebSocket.
+  * `WS_SERVER_PORTS`: List of ports (8001–8005) the extension will try for WebSocket connection.
+  * `CONNECTION_CODE`: Handshake code exchanged with the server.
+  * `socket`, `socketConnected`, `connectedPort`: Variables tracking WebSocket state.
 
-* **Fungsi Utama**
+* **Core Functions**
 
-  * `isConnected()`: Mengecek koneksi WebSocket aktif.
-  * `getConnectedPort()`: Mengembalikan port yang terhubung.
-  * `cleanupSocket()`: Menutup dan mereset socket jika perlu.
-  * `connectToServer(callback)`: Mencoba koneksi berurutan ke port yang tersedia. Menggunakan `chrome.storage.local.enabled` untuk menghentikan/restart proses saat opsi on/off.
-  * `sendUrl(url)`: Mengirim URL video ke server, memastikan format valid (`youtube.com/watch`), melakukan reconnect jika koneksi terputus.
-  * `scanTabs()`: Memindai semua tab browser yang aktif, mengirim ulang URL YouTube.
+  * `isConnected()`: Returns `true` if the WebSocket is open.
+  * `getConnectedPort()`: Returns the active port number.
+  * `cleanupSocket()`: Closes and resets the socket when needed.
+  * `connectToServer(callback)`: Attempts to connect sequentially to each port. Respects `enabled` flag in `chrome.storage.local` to pause or resume.
+  * `sendUrl(url)`: Validates the URL, ensures connection, then sends payload `{url}` to server. Reconnects if necessary.
+  * `scanTabs()`: Iterates over all open tabs and sends any YouTube video URLs found.
 
-* **Event Listener**
+* **Event Listeners**
 
-  * `chrome.webRequest.onCompleted`: Deteksi request yang selesai, kirim URL YouTube jika match.
-  * `chrome.runtime.onStartup`: Saat browser start, panggil `connectToServer()`.
-  * `chrome.storage.onChanged`: Respon saat user toggle on/off di popup.
-  * Inisialisasi awal: baca `enabled` → jika true, langsung connect.
-  * Mengekspos `isConnected`, `getConnectedPort`, `scanTabs` ke `window` untuk akses popup.
+  * `chrome.webRequest.onCompleted`: Detects completed requests and sends YouTube URLs.
+  * `chrome.runtime.onStartup`: Connects to server when the browser starts.
+  * `chrome.storage.onChanged`: Reacts to the `enabled` flag being toggled in the popup.
+  * Initial load: Reads `enabled` flag and calls `connectToServer()` if enabled.
+  * Exposes `isConnected`, `getConnectedPort`, and `scanTabs` on `window` for popup access.
 
 ### 2. `manifest.json`
 
-Menentukan manifest v2:
+Defines the extension:
 
-* `permissions`: `tabs`, `storage`, `webNavigation`, `webRequest`, `<all_urls>`.
-* `background.scripts`: `background.js`, `persistent: true`.
-* `browser_action`: Popup, title, ikon.
+* **manifest\_version**: 2
+* **permissions**: `tabs`, `storage`, `webNavigation`, `webRequest`, `<all_urls>`.
+* **background**: Loads `background.js` as a persistent script.
+* **browser\_action**: Configures popup HTML, title, and icon.
 
 ### 3. `popup.html` & `popup.js`
 
 **popup.html**
 
-* Struktur HTML sederhana, memuat CSS dan `popup.js`.
+* Basic HTML structure including a container, title, toggle button, connection status, and list of active YouTube tabs.
 
 **popup.js**
 
-* **UI Elements**: Status koneksi, port, tombol toggle, daftar tab YouTube.
-* `refreshUI()`: Ambil status `enabled` dan `isConnected` dari background, update teks + warna.
-* `updateTabList()`: Query semua tab, filter URL YouTube, buat/mutakhirkan list item dengan animasi marquee jika teks panjang.
-* `toggleBtn` listener: Toggle opsi `enabled` di `chrome.storage.local`.
-* Refresh UI setiap 2 detik untuk sinkronisasi real-time.
+* **UI Elements**: Reflect connection status, port number, toggle for enabling/disabling logging, and list of open YouTube tabs.
+* `refreshUI()`: Fetches `enabled` and connection state from the background script to update UI text, colors, and icons.
+* `updateTabList()`: Queries all browser tabs, filters for YouTube video URLs, and renders/upates list items with marquee effect if titles overflow.
+* Toggle button listener: Toggles `enabled` in `chrome.storage.local`.
+* Auto-refreshes UI every 2 seconds for live updates.
 
-### 4. `server_ektension_firefox.py`
+### 4. `server_extension_firefox.py`
 
-* **Konfigurasi & Logger**
+* **Configuration & Logging**
 
-  * `MUSIC_KEYWORDS`: Kata kunci identifikasi video musik.
-  * File log: `tab_log.txt` (musik), `un_log.txt` (non-musik), `logging.txt` (logger).
+  * `MUSIC_KEYWORDS`: Keywords used to identify music videos.
+  * Log files: `tab_log.txt` (music), `un_log.txt` (non-music), `logging.txt` (detailed logs).
 
-* **Inisialisasi**
+* **Initialization**
 
-  * `load_logged_links()`, `load_un_logged_links()`: Muat link yang sudah pernah diproses.
+  * `load_logged_links()`, `load_un_logged_links()`: Populate sets from existing log files to avoid duplicates.
 
-* **Fungsi Asinkron**
+* **Async Utilities**
 
-  * `canonicalize_youtube_url(url)`: Ekstraksi ID video, normalisasi ke format `https://www.youtube.com/watch?v=VIDEO_ID`.
-  * `extract_info(canonical_url)`: Gunakan `yt_dlp.YoutubeDL` untuk mengambil metadata (tanpa download video).
-  * `is_music_video(info)`: Heuristik dari judul, tag, deskripsi, kategori, atau nama channel untuk menentukan apakah video musik.
+  * `canonicalize_youtube_url(url)`: Extracts the video ID and returns canonical URL `https://www.youtube.com/watch?v=VIDEO_ID`.
+  * `extract_info(canonical_url)`: Uses `yt-dlp` to fetch metadata without downloading video.
+  * `is_music_video(info)`: Applies heuristics on title, tags, description, categories, and channel name to classify music videos.
 
 * **WebSocket Handler**
 
-  * Menerima handshake kode (`EXPECTED_CODE`). Set port utama (`successful_port`), lalu terima pesan JSON berisi `url`.
-  * Canonicalize → periksa duplikasi → ekstrak metadata → log ke file sesuai hasil deteksi musik.
-  * Tangani error handshake, JSON invalid, koneksi tertutup, dan multi-port fallback.
+  * Validates handshake code, sets a primary port, and listens for JSON messages containing `url`.
+  * For each URL: canonicalize → deduplicate → fetch metadata → classify → append to the appropriate log file.
+  * Handles errors in JSON parsing, invalid URLs, and multi-port fallback logic.
 
-* **Main Event Loop**
+* **Main Server Loop**
 
-  * Jalankan server websockets pada semua port di `PORTS_TO_TRY`.
-  * Tunggu handshake pertama → tutup server lain → jalankan server utama hingga user tekan `q`.
-
----
-
-## 🔍 Debugging & Tips
-
-* Pastikan port 8001–8005 tidak diblokir oleh firewall.
-* Cek `logging.txt` untuk detail error.
-* Pengaturan `enabled` dapat diubah langsung di "Storage Inspector" (DevTools).
+  * Launches WebSocket servers concurrently on all specified ports.
+  * Waits for the first valid handshake → shuts down other ports → runs the primary server until user quits by pressing `q`.
 
 ---
 
-**Lisensi**
-Proyek ini dirilis di bawah lisensi MIT. Silakan modifikasi sesuai kebutuhan.
+## 🔍 Troubleshooting & Tips
 
-**Kontributor**
-
-* Nama Anda
-* Email / GitHub
+* Ensure ports 8001–8005 are accessible and not blocked by firewall.
+* Check `logging.txt` for detailed error messages.
+* You can manually toggle logging in the browser’s Storage Inspector (DevTools).
 
 ---
+
+## 📄 License
+
+Released under the MIT License. Feel free to fork and modify as needed.
+
+---
+
+**Contributors**
+
+* AESMSIX-OFFICIAL
 
 © 2025 YouTube Logger Project
