@@ -1,9 +1,36 @@
+import subprocess
+import importlib
+import platform
+import os
+
+def clear_console():
+    if platform.system() == "Windows":
+        os.system('cls')
+    else:
+        os.system('clear')
+        
+packages = {
+    'websockets': 'websockets',
+    'yt_dlp': 'yt_dlp',
+}
+
+def install_if_missing(module_name, pip_name):
+    try:
+        importlib.import_module(module_name)
+        print(f"Modul '{module_name}' sudah terinstal.")
+    except ImportError:
+        print(f"Modul '{module_name}' tidak ditemukan. Menginstal package '{pip_name}'...")
+        subprocess.check_call(['pip', 'install', pip_name])
+        print(f"Package '{pip_name}' berhasil diinstal.")
+for module_name, pip_name in packages.items():
+    install_if_missing(module_name, pip_name)
+    clear_console()
+
 import asyncio
 import websockets
 import json
 from urllib.parse import urlparse, parse_qs
 import threading
-import os
 import logging
 from yt_dlp import YoutubeDL, DownloadError
 import sys
@@ -12,7 +39,7 @@ import socket
 MUSIC_KEYWORDS = ['official video', 'lyrics', 'remix', 'cover', 'audio', 'ft.', 'feat', 'mv']
 LOG_FILE = "tab_log.txt"
 UN_LOG_FILE = "un_log.txt"
-PORTS_TO_TRY = [8001, 8002, 8003, 8004, 8005]
+PORTS_TO_TRY = [3101, 3202, 3303, 3404, 3505]
 EXPECTED_CODE = "EKSTENSI_FIREFOX_1234"
 
 logging.basicConfig(
@@ -26,10 +53,10 @@ logged_links = set()
 un_logged_links = set()
 connection_established_event = asyncio.Event()
 successful_port = None
+active_client_websocket = None
 running_servers = {}
 
 def load_logged_links():
-    """Loads previously logged music links from the log file."""
     if os.path.exists(LOG_FILE):
         try:
             with open(LOG_FILE, "r", encoding="utf-8") as f:
@@ -43,7 +70,6 @@ def load_logged_links():
             logger.error(f"Error loading logged links from {LOG_FILE}: {e}")
 
 def load_un_logged_links():
-    """Loads previously logged non-music links from the unlog file."""
     if os.path.exists(UN_LOG_FILE):
         try:
             with open(UN_LOG_FILE, "r", encoding="utf-8") as f:
@@ -78,7 +104,7 @@ async def canonicalize_youtube_url(url):
         if not video_id or len(video_id) != 11:
              logger.warning(f"Extracted video ID looks invalid: '{video_id}' from URL: {url}")
              return None
-        standard_url = f"https://www.youtube.com/watch?v={video_id}" # Using '2' as a canonical marker
+        standard_url = f"https://www.youtube.com/watch?v={video_id}"
         logger.debug(f"Canonicalized '{url}' to '{standard_url}'")
         return standard_url
     except Exception as e:
@@ -156,6 +182,28 @@ def is_music_video(info):
         logger.warning(f"Error analyzing video info in is_music_video: {e}", exc_info=True)
     return False
 
+async def safe_reboot():
+    try:
+        await reboot_servers()
+    except Exception as e:
+        logger.error(f"Error during reboot: {e}", exc_info=True)
+        print(f"Error during reboot: {e}")
+
+async def reboot_servers():
+    global running_servers, successful_port
+    logger.info("Shutting down all servers for reboot.")
+    shutdown_tasks = []
+    for port, server_obj in running_servers.items():
+        server_obj.close()
+        shutdown_tasks.append(asyncio.create_task(server_obj.wait_closed()))
+    await asyncio.gather(*shutdown_tasks, return_exceptions=True)
+    running_servers.clear()
+    successful_port = None
+    await asyncio.sleep(1)  
+    logger.info("Restarting all servers after reboot.")
+    print("Restarting all servers...")
+    await start_servers()
+
 async def handler(websocket):
     global successful_port, connection_established_event, running_servers
     client_addr = websocket.remote_address
@@ -165,6 +213,12 @@ async def handler(websocket):
     try:
         try:
             message = await asyncio.wait_for(websocket.recv(), timeout=15)
+            global active_client_websocket
+            if active_client_websocket is not None:
+                logger.warning(f"Connection attempt rejected on port {current_port} - another client is already connected.")
+                await websocket.send(json.dumps({"message": "Only one client allowed. Connection rejected."}))
+                await websocket.close()
+                return
             logger.debug(f"Received first message on port {current_port} from {client_addr}: '{message}'")
         except asyncio.TimeoutError:
             logger.warning(f"Handshake timeout on port {current_port} from {client_addr}. Closing connection.")
@@ -189,10 +243,11 @@ async def handler(websocket):
                      await websocket.close()
                      return
             else:
-                successful_port = current_port
                 connection_established_event.set()
+                successful_port = current_port
                 logger.info(f"Primary connection established on port {current_port} from {client_addr}.")
                 print(f"Primary connection established on port {current_port}.")
+                active_client_websocket = websocket
                 await websocket.send(json.dumps({"message": f"Connection established with primary server on port {current_port}."}))
             async for message in websocket:
                 if connection_established_event.is_set() and websocket.local_address[1] != successful_port:
@@ -258,6 +313,12 @@ async def handler(websocket):
         print(f"Unexpected error in handler for {client_addr} on port {current_port}.")
     finally:
         logger.info(f"Handler for client {client_addr} on port {current_port} finished.")
+        if active_client_websocket == websocket:
+            logger.info(f"Primary client disconnected. Triggering reboot of all ports.")
+            print(f"Primary client disconnected. Rebooting servers...")
+            active_client_websocket = None
+            connection_established_event.clear()
+            asyncio.create_task(safe_reboot())
 
 def listen_for_quit(loop):
     print("\nPress 'q' and Enter to shut down the server.")
@@ -283,91 +344,53 @@ def listen_for_quit(loop):
         logger.info("Quit listener thread finished.")
         print("Quit listener thread finished.")
 
-async def main():
-    global successful_port, running_servers, connection_established_event
-    connection_established_event = asyncio.Event()
-    successful_port = None
-    running_servers = {}
-    loop = asyncio.get_running_loop()
-    threading.Thread(target=listen_for_quit, args=(loop,), daemon=True).start()
-    print(f"Attempting to start servers concurrently on ports: {PORTS_TO_TRY}")
-    logger.info(f"Attempting to start servers concurrently on ports: {PORTS_TO_TRY}")
+async def start_servers():
+    global running_servers
     server_creation_tasks = [
         websockets.serve(handler, "127.0.0.1", port) for port in PORTS_TO_TRY
     ]
-    started_servers = []
-    try:
-        started_servers = await asyncio.gather(*server_creation_tasks)
-        for i, server_obj in enumerate(started_servers):
+    started_servers = await asyncio.gather(*server_creation_tasks, return_exceptions=True)
+    for i, server_obj in enumerate(started_servers):
+        if isinstance(server_obj, Exception):
+            logger.error(f"Failed to start server on port {PORTS_TO_TRY[i]}: {server_obj}")
+        else:
             port = PORTS_TO_TRY[i]
             running_servers[port] = server_obj
-            print(f"Server successfully created on ws://127.0.0.1:{port}") # Keep this print
-            logger.info(f"Server successfully created on ws://127.0.0.1:{port}")
-    except Exception as e:
-        logger.critical(f"Failed to start server on one or more ports during concurrent startup: {e}", exc_info=True)
-        print(f"Failed to start server on one or more ports during concurrent startup: {e}")
-        for server_obj in started_servers:
-             if server_obj and not server_obj.closed:
-                  try:
-                      port_to_close = server_obj.sockets[0].getsockname()[1]
-                      logger.warning(f"Closing server on port {port_to_close} due to startup error elsewhere.")
-                      server_obj.close()
-                  except Exception: pass
-        loop.call_soon(loop.stop)
-        return
-    if not running_servers:
-         logger.critical("No servers could be started on any of the specified ports after attempted concurrent startup. Exiting.")
-         print("No servers could be started on any of the specified ports. Exiting.")
-         loop.call_soon(loop.stop)
-         return
-    print("Waiting for a primary connection handshake on any port...")
-    logger.info("Waiting for a primary connection handshake on any port...")
-    try:
+            print(f"Server started on ws://127.0.0.1:{port}")
+            logger.info(f"Server started on ws://127.0.0.1:{port}")
+
+async def main():
+    global successful_port, running_servers, connection_established_event
+    loop = asyncio.get_running_loop()
+    threading.Thread(target=listen_for_quit, args=(loop,), daemon=True).start()
+    while True:
+        connection_established_event = asyncio.Event()
+        successful_port = None
+        running_servers.clear()
+        await start_servers()
+        if not running_servers:
+            logger.critical("No servers could be started on any of the specified ports. Retrying in 5s...")
+            print("No servers could start; retrying in 5 seconds...")
+            await asyncio.sleep(5)
+            continue
+        ports = list(running_servers.keys())
+        print(f"Servers listening on ports: {ports}. Waiting for primary handshake…")
+        logger.info(f"Servers started on {ports}, awaiting primary connection.")
         await connection_established_event.wait()
-        if successful_port is not None:
-            logger.info(f"Primary connection established on port {successful_port}.")
-            shutdown_tasks = []
-            for port, server_obj in list(running_servers.items()):
-                if port != successful_port:
-                    logger.info(f"Initiating shutdown for server on port {port} (not primary).")
-                    server_obj.close()
-                    shutdown_tasks.append(asyncio.create_task(server_obj.wait_closed()))
-                    del running_servers[port]
-            if shutdown_tasks:
-                logger.info("Waiting for other servers to shut down...")
-                await asyncio.gather(*shutdown_tasks, return_exceptions=True)
-                logger.info("Other servers shut down.")
-            else:
-                 print("No other servers to shut down.")
-                 logger.info("No other servers to shut down.")
-            print(f"Primary server on port {successful_port} is running. Press 'q' to quit.")
-            logger.info(f"Primary server on port {successful_port} is running.")
-            try:
-                await running_servers[successful_port].wait_closed()
-            except asyncio.CancelledError:
-                 logger.info(f"Primary server on port {successful_port} await_closed was cancelled (server shutting down).")
-                 print(f"Primary server on port {successful_port} await_closed was cancelled.")
-            except Exception as e:
-                 logger.error(f"Error while waiting for primary server on port {successful_port} to close: {e}", exc_info=True)
-                 print(f"Error while waiting for primary server on port {successful_port} to close: {e}")
-        else:
-            logger.error("Internal error: connection_established_event was set but successful_port is None!")
-            print("Internal error: successful_port is None after event set.")
-            for server_obj in running_servers.values():
-                 if not server_obj.closed:
-                      server_obj.close()
-            loop.call_soon(loop.stop)
-    except Exception as e:
-        logger.critical(f"An unhandled exception occurred during server operation: {e}", exc_info=True)
-        print(f"An unhandled exception occurred during server operation: {e}")
-        for server_obj in running_servers.values():
-             if not server_obj.closed:
-                  try:
-                      port_to_close = server_obj.sockets[0].getsockname()[1]
-                      logger.warning(f"Attempting to close server on port {port_to_close} due to unhandled error.")
-                      server_obj.close()
-                  except Exception: pass
-        loop.call_soon(loop.stop)
+        for port, server_obj in list(running_servers.items()):
+            if port != successful_port:
+                logger.info(f"Closing non-primary server on port {port}")
+                server_obj.close()
+                await server_obj.wait_closed()
+                del running_servers[port]
+        print(f"Primary server on port {successful_port} established. Serving until disconnect…")
+        logger.info(f"Primary server on port {successful_port} is now active.")
+        try:
+            await running_servers[successful_port].wait_closed()
+        except Exception as e:
+            logger.error(f"Error waiting for primary server to close: {e}", exc_info=True)
+        print("Primary client disconnected. Rebooting servers…")
+        logger.info("Primary client disconnected; restarting server cycle.")
 
 if __name__ == "__main__":
     try:
@@ -375,8 +398,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Server interrupted by user (Ctrl+C) outside asyncio.run block.")
         print("Server interrupted by user (Ctrl+C).")
-    except SystemExit:
-        pass
     except Exception as e:
         logger.critical(f"An unhandled exception occurred at the top level: {e}", exc_info=True)
         print(f"An unhandled exception occurred: {e}")
+    finally:
+        print("Exiting server...")
