@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h3 class="title">YouTube Logger V4.3</h3>
+    <button id="toggleBtn" class="toggle-btn">Loading...</button>
+    <div class="status-area">
+      <div class="status-container">
+        <span class="status-icon" id="statusIcon"></span>
+        <span id="connStatus" class="status-text">...</span>
+        <div id="reconnecting" style="display:none; color:#ffc107; font-size: 12px; margin-top: 4px;">Reconnecting...</div>
+      </div>
+      <div id="portInfo" class="port-info">Port: -</div>
+      <div id="errorMsg" class="error-msg" style="display:none;"></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Active YouTube Tabs:</div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
